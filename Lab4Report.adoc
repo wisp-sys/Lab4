@@ -21,8 +21,31 @@
  2 МГц * 50 МГц = 100 МГц
  100 МГц / 6 МГц = 16 МГц
 
-.Полученный код
-image::Photo/file.png[]
+
+[source, cpp]
+----
+RCC::CR::HSEON::On::Set();
+  while(!RCC::CR::HSERDY::Ready::IsSet())
+  {
+  }
+  RCC::CFGR::SW::Hse::Set();
+  while(!RCC::CFGR::SWS::Hse::IsSet())
+  {
+  }
+  RCC::CR::HSION::Off::Set();
+  RCC::PLLCFGR::PLLSRC::HseSource::Set();
+  RCC::PLLCFGR::PLLM0::Set(4U); // 8 MHz / 4 MHz = 2 MHz
+  RCC::PLLCFGR::PLLN0::Set(50U); // 2 MHz * 50 MHz = 100 MHz (так как значения должны быть от 100 MHz до 432 MHz)
+  RCC::PLLCFGR::PLLP0::Pllp6::Set(); // 100 MHz / 6 = 16 MHz
+  RCC::CR::PLLON::On::Set();
+  while(RCC::CR::PLLRDY::Unlocked::IsSet())
+  {
+  }
+  RCC::CFGR::SW::Pll::Set();
+  while(!RCC::CFGR::SWS::Pll::IsSet())
+  {
+  }
+----
 
 В ходе работы столкнулись с проблемой: Мы не смогли тактироваться от частоты, которая была бы
 меньше _15 МГц_. Вручную, с помощью делителей были произведены многочисленные опыты по подбору
@@ -42,8 +65,27 @@ _Шаблоны позволяют создавать параметризова
 
 Чтобы получить структуру следующего вида нам нужно поработать с классами.
 
-.Желаемый код
-image::Photo/file1.png[]
+[source, cpp]
+----
+int main()
+{
+    // Здесь надо настроить PLL на 10 Мгц от внешнего источника и переключить его на системную частоту
+
+  for(;;)
+  {
+  if(UserButton::IsPressed())
+  {
+    Leds::Toggle();
+  }
+  }
+  // кнопка находится на порту PORTC.13
+  // светодиоды на порту PC.9, PC.8, PC.5, PA.5
+  // Задание По нажатию кнопки переключать все
+  // 4 светодиода в противоположное состояние
+  return 1 ;
+}
+----
+
 
 
 Создадим 4 класса:
@@ -54,39 +96,168 @@ image::Photo/file1.png[]
 - *Leds* - за работу со светодиодами.
 
 
-.Созданные классы
-image::Photo/file2.png[]
+[source, cpp]
+----
+template<typename T> // Данный класс отвечает за работу с портом ( вместо T будем передавать значения портов: GPIOA, GPOIC и т.д.)
+struct Port
+{
+  static void Set(std::uint32_t value)
+  {
+    T::BSSR::Write(value);
+  }
+
+  static void Reset(std::uint32_t value)
+  {
+    T::BSSR::Write(value << 16U);
+  }
+
+  static void Toggle(std::uint32_t value)
+  {
+    T::ODR::Toggle(value);
+  }
+
+  static auto Get()
+  {
+    return T::IDR::Get();
+  }
+
+};
+
+template<typename Port, uint8_t pinNum>  // Данынй класс отвечает за переключение одной ножки
+struct Pin
+{
+  static void Set()
+  {
+    Port::Set(1U << pinNum);
+  }
+
+  static void Reset()
+  {
+    Port::Reset(1U << pinNum);
+  }
+
+  static void Toggle()
+  {
+    Port::Toggle(1U << pinNum);
+  }
+
+  static auto IsSet()
+  {
+    return ((Port::Get() & (1U << pinNum)) != 0 );
+  }
+
+
+};
+
+template<typename Pin>  // Данынй класс отвечает за переключение кнопки
+struct Button
+{
+   static auto IsPressed()
+  {
+    if(!Pin::IsSet())
+    {
+      while(!Pin::IsSet())
+      {
+
+      }
+      return true;
+    }
+
+    return false;
+
+  }
+};
+
+template<typename ... Tleds> // Данный класс отвечает за работу с индикаторами
+struct Leds
+{
+   static void Toggle()
+  {
+    (Tleds::Toggle(),...);
+  }
+};
+
+----
+
 
 
 В каждом классе описаны определенные функции, которые приведены на рисунках ниже:
 
 
-.Port
-image::Photo/file3.png[]
-
-.Pin
-image::Photo/file4.png[]
-
-.Button
-image::Photo/file5.png[]
-
-.Leds
-image::Photo/file6.png[]
-
 Также дополнительно была создана функция *Delay*:
 
-.Функция задержки
-image::Photo/file7.png[]
+[source, cpp]
+----
+void Delay()
+    {
+    for(int i = 0; i < 1000000; i++)
+    {
+    }
+}
+----
 
 Затем, с помощью *using*, введём пользовательские типы:
 
-.Использование *using*
-image::Photo/file8.png[]
+[source, cpp]
+----
+using ButtonPin = Pin<Port<GPIOC>, 13>; // Вводим польовательский тип, который равен пину (Gpioc, 13)
+using UserButton = Button<ButtonPin>;
+
+using LED1 = Pin<Port<GPIOC>, 5>;
+using LED2 = Pin<Port<GPIOC>, 8>;
+using LED3 = Pin<Port<GPIOC>, 9>;
+using LED4 = Pin<Port<GPIOA>, 5>;
+using MyLeds = Leds<LED1, LED2, LED3, LED4>;
+----
+
 
 Полученный код имеет следующий вид:
 
-image::Photo/file9.png[]
-image::Photo/file10.png[250,250]
+
+[source, cpp]
+----
+int main()
+{
+RCC::CR::HSEON::On::Set();
+while(!RCC::CR::HSERDY::Ready::IsSet())
+{
+}
+RCC::CFGR::SW::Hse::Set();
+while(!RCC::CFGR::SWS::Hse::IsSet())
+{
+}
+RCC::CR::HSION::Off::Set();
+RCC::PLLCFGR::PLLSRC::HseSource::Set();
+RCC::PLLCFGR::PLLM0::Set(4U); // 8 MHz / 4 MHz = 2 MHz
+RCC::PLLCFGR::PLLN0::Set(50U); // 2 MHz * 50 MHz = 100 MHz (так как значения должны быть от 100 MHz до 432 MHz)
+RCC::PLLCFGR::PLLP0::Pllp6::Set(); // 100 MHz / 6 = 16 MHz
+RCC::CR::PLLON::On::Set();
+while(RCC::CR::PLLRDY::Unlocked::IsSet())
+{
+}
+RCC::CFGR::SW::Pll::Set();
+while(!RCC::CFGR::SWS::Pll::IsSet())
+{
+}
+RCC::AHB1ENR::GPIOCEN::Enable::Set();
+RCC::AHB1ENR::GPIOAEN::Enable::Set();
+GPIOC::MODER::MODER13::Input::Set();
+GPIOC::MODER::MODER5::Output::Set();
+GPIOC::MODER::MODER8::Output::Set();
+GPIOC::MODER::MODER9::Output::Set();
+GPIOA::MODER::MODER5::Output::Set();
+
+  for(;;)
+    {
+    if(UserButton::IsPressed())
+    {
+      MyLeds::Toggle();
+    }
+
+    Delay();
+   }
+}
+----
 
 Запустим программу и посмотрим на результат. Мы получили, что при нажатии кнопки,
 у нас включаются все четыре светодиода. Результат в формате *gif* лежит в папке *Photo*.
