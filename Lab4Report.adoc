@@ -261,6 +261,6 @@ GPIOA::MODER::MODER5::Output::Set();
 
 Результат работы программы:
 
-image::https://https://github.com/wisp-sys/Lab4/blob/main/Photo/123.gif[]
+image::https://github.com/wisp-sys/Lab4/blob/main/Photo/123.gif[]
 
 
